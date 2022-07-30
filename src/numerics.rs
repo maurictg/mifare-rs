@@ -1,5 +1,7 @@
 use ::std::marker::PhantomData;
 
+use crate::SectorBlockOffset4K;
+
 /// Represents capacity of a tag
 pub trait TagCapacity {
     fn bytes() -> u16;
@@ -181,6 +183,8 @@ where CapF: TagCapacity,
       SectorNumber<CapF>: Into<SectorNumber<CapT>> {
 
     fn from(sector_number: SectorNumber<CapF>) -> Self {
-        sector_number.into().into()
+        // sector_number.into().into() is causing loop, this fixes it
+        // let number: u8 = u8::from(sector_number);
+        SectorBlockOffset::raw(sector_number.0 * 4)
     }
 }

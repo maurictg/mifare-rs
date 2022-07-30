@@ -48,16 +48,17 @@ impl<T: NFCTag> MifareTag<T> {
     }
 
     /// Authenticates to sector using key.
-    pub fn authenticate_sector<'s, SN: Into<SectorBlockOffset4K>>(&'s mut self, sector_number: SN, key_option: KeyOption, key: &[u8; 6]) -> Result<AuthenticatedSector<'s, T>, T::TransceiveError> {
-        let sector_offset = sector_number.into();
+    pub fn authenticate_sector<'s, SN: Into<SectorBlockOffset4K>>(&'s mut self, sector_number: SN, key_option: KeyOption, key: &[u8; 6]) -> Result<AuthenticatedSector<'s, T>, T::TransceiveError> {        
+        let sector_offset : SectorBlockOffset4K = sector_number.into();
 
         let cmd = match key_option {
-            KeyOption::KeyA => 0x60,
-            KeyOption::KeyB => 0x61,
+            KeyOption::KeyA => 0x60, //MIFARE_CMD_AUTH_A
+            KeyOption::KeyB => 0x61, //MIFARE_CMD_AUTH_B
         };
 
         let (auth_cmd_buf, len) = {
             let tag_id = self.tag.tag_id();
+
             let mut auth_cmd_buf = [cmd, sector_offset.into(), key[0], key[1], key[2], key[3], key[4], key[5], tag_id[0], tag_id[1], tag_id[2], tag_id[3], 0x00, 0x00, 0x00];
             if tag_id.len() == 7 {
                 auth_cmd_buf[12] = tag_id[4];
@@ -66,15 +67,18 @@ impl<T: NFCTag> MifareTag<T> {
             };
             (auth_cmd_buf, tag_id.len())
         };
+
         let auth_cmd = match len {
-            4 => &auth_cmd_buf[0..12],
+            4 => &auth_cmd_buf[0..12], // omits last 3 bytes for longer tagId
             7 => &auth_cmd_buf,
             _ => unreachable!(),
         };
 
         let mut resp = [0u8; 16];
+
         // Empty response on success
-        try!(self.tag.transceive(auth_cmd, &mut resp));
+        self.tag.transceive(auth_cmd, &mut resp)?;
+        println!("authenticate response: {:X?}", resp);
 
         Ok(AuthenticatedSector { tag: self, sector_offset: sector_offset })
     }
@@ -97,27 +101,23 @@ impl<'a, T: 'a + NFCTag> AuthenticatedSector<'a, T> {
     ///
     /// Warning: This interface is temporary and will change!
     pub fn read_block(&mut self, offset: BlockOffset, buf: &mut [u8]) -> Result<(), T::TransceiveError> {
-        let read_cmd = [0x30, (self.sector_offset + offset).into()];
-        try!(self.tag.tag.transceive(&read_cmd, buf));
+        let read_cmd = [0x30, (self.sector_offset + offset).into()]; //MIFARE_CMD_READ
+        self.tag.tag.transceive(&read_cmd, buf)?;
         Ok(())
     }
 
     fn write_block_raw(&mut self, offset: AbsoluteBlockOffset4K, data: &[u8; 16]) -> Result<(), T::TransceiveError> {
         let mut write_cmd = [0; 18];
-        write_cmd[0] = 0xA0;
+        write_cmd[0] = 0xA0; //MIFARE_CMD_WRITE
         write_cmd[1] = offset.into();
         write_cmd[2..].copy_from_slice(&*data);
 
         let mut resp = [0; 16];
-        try!(self.tag.tag.transceive(&write_cmd, &mut resp));
+        self.tag.tag.transceive(&write_cmd, &mut resp)?;
         Ok(())
     }
 
     /// Writes 16 bytes of data to given block
-    ///
-    /// WARNING: NOT tested!!! Use at your own risk! By writing incorrect values, you may
-    /// permanently damage the tag!
-    /// This interface is temporary and will change!
     pub fn write_block(&mut self, offset: BlockOffset, data: &[u8; 16]) -> Result<(), T::TransceiveError> {
         let offset = self.sector_offset + offset;
         self.write_block_raw(offset, data)
